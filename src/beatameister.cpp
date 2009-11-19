@@ -70,10 +70,11 @@ using namespace std;
 #define MY_FREQ 44100
 #define MY_PIE 3.14159265358979
 #define SAMPLE float
-
+// Mappings
+// 36: bass, 38: snare, 45: midtom, 42:hihat
 // Constants that can be changed via the keyboard
-int g_numLastBuffersToSee = 20;
-int g_numLastBuffersToUse = 8;
+int g_numLastBuffersToSee = 100;
+int g_numLastBuffersToUse = 4;
 
 
 int g_numMaxBuffersToUse = 100;
@@ -86,14 +87,20 @@ int g_sampleBuffersSize = 400;
 
 // Am I recording?
 bool g_recording = false;
+// Threshold on RMS Energy to start recording
+double g_energyThreshold = 0.01;
 
 // Should opengl thread extract features
 bool g_shouldCalculateFeatures = false;
 
 // Globals Representing Features
-float g_zeroCrossings = 0, g_rmsAmplitude = 0, g_rolloff = 0, g_centroid = 0, g_kurtosis = 0;
+float g_zeroCrossings = 0, g_rmsAmplitude = 0, g_rolloff = 0, g_centroid = 0, g_kurtosis = 0, g_spectral_stddev = 0, g_pitch = 0;
 xtract_mel_filter * g_mMFilters;
 float *g_mfcc;
+
+string g_instrument = "";
+// zcr threshold
+double g_zcrThreshold = 0.1;
 // Samples for feature extraction
 SAMPLE * g_samples;
 int g_samplesSize = 0;
@@ -141,22 +148,48 @@ int callback_func( void *output_buffer, void *input_buffer, unsigned int nFrames
 		g_start--;
 	}
 	g_sampleBuffers.push_back(m_buffer);
+	// detect energy via RMS
+	float sum = 0;	
+	for( int i = 0; i < nFrames; i++ )
+    {
+		sum+= old_buffer[i]*old_buffer[i];
+    }
+	sum/=nFrames;
+	sum = sqrt(sum);
 	
+	// cout<<sum<<endl;
+	if(!g_recording && sum>g_energyThreshold) {
+		// Start Recording
+		g_recording = true;
+		g_numBuffersSeen = 0;	
+		g_start = g_sampleBuffers.size();
+		cout<<"Started Recording Automatically"<<endl;
+			
+	}
+		
 	if(g_recording) {
+		if(sum<g_energyThreshold)
+			g_recording = false;
+		else {
 		if(g_numBuffersSeen == 0) {
 			g_samplesSize = 0;
 		}
-		for( int i = 0; i < nFrames; i++ )
-	    {
-			// Do Something
-			g_samples[g_samplesSize] = old_buffer[i];
-			g_samplesSize++;
-	    }
+		if(g_numBuffersSeen < g_numLastBuffersToUse) {
+			for( int i = 0; i < nFrames; i++ )
+	    	{
+				// Do Something
+				g_samples[g_samplesSize] = old_buffer[i];
+				g_samplesSize++;
+	    	}
+		}
 		g_numBuffersSeen++;
+		// cout<<g_numBuffersSeen<<endl;
 		if(g_numBuffersSeen == g_numLastBuffersToUse) {
-			g_recording = false;
-			g_numBuffersSeen = 0;
+			// g_recording = false;
+			// g_numBuffersSeen = 0;
 			g_shouldCalculateFeatures = true;
+			// cout<<"Now it should calculate features"<<endl;
+		}
 		}
 	}
     
@@ -174,6 +207,9 @@ void initMFCC();
 void detectZeroCrossings( float& );
 void detectRMSAmplitude( float& );
 void detectRollOff(float &result, float *spectrum, int n);
+// void detectSpectralStandardDeviation(float &result, float *spectrum, int n);
+void detectPitch(float &result);
+void detectSpectralStandardDeviation(float &result);
 void detectSpectralKurtosis(float &result, float *spectrum, int n);
 void detectSpectralCentroid(float &result, float *spectrum, int n);
 void detectMFCC(float *result, float *spectrum, int n);
@@ -621,25 +657,42 @@ void displayFunc( )
 	    
 	}
 	if(g_shouldCalculateFeatures) {
+		cout<<"Calculating features"<<endl;
 		// Reset Features
 		g_zeroCrossings = 0;
 		g_rmsAmplitude = 0;
 		g_rolloff = 0;
 		g_kurtosis = 0;
+		g_spectral_stddev = 0;
+		g_pitch = 0;
 		for(int i=0;i<g_mMFilters->n_filters;i++)
 			g_mfcc[i] = 0;
 		// Calculate Features
-		// detectZeroCrossings(g_zeroCrossings);
+		detectZeroCrossings(g_zeroCrossings);
 		// detectRMSAmplitude(g_rmsAmplitude);
-		spectrum = getSpectrum();
-		int n = g_samplesSize/2;
+		// spectrum = getSpectrum();
+		// int n = g_samplesSize/2;
 		// detectRollOff(g_rolloff, spectrum, n);
-		detectSpectralCentroid(g_centroid, spectrum, n);
+		// detectSpectralCentroid(g_centroid, spectrum, n);
+		// detectSpectralStandardDeviation(g_spectral_stddev);
+		detectPitch(g_pitch);
+		// detectSpectralStandardDeviation(g_spectral_stddev, spectrum, n);
 		// detectSpectralKurtosis(g_kurtosis, spectrum, n);
 		// detectMFCC(g_mfcc, spectrum, n);
 		// calculate_dwt();
 		// calculate_lpc();
 		g_shouldCalculateFeatures = false;
+		
+		// Instrument Classification
+		if(g_zeroCrossings > g_zcrThreshold) {
+			g_instrument = "snare";
+		}
+		else {
+			if(g_pitch > 30)
+				g_instrument = "midtom";
+			else
+				g_instrument = "bass";
+		}
 		
 	}
 	//glPushMatrix();
@@ -647,7 +700,7 @@ void displayFunc( )
 		// set the color
 		//glColor3f(0.25, 0.25, 1.0);
 	
-		ostringstream s,s1,s2,s3,s4;
+		ostringstream s,s1,s2,s3,s4,s5;
 		s<<"Zero Crossing Rate: "<<g_zeroCrossings;	    
 		draw_string(1.5,1,0,s.str().c_str(),1);
 		s1<<"RMS Amp: "<<g_rmsAmplitude;	    
@@ -658,7 +711,12 @@ void displayFunc( )
 		draw_string(1.5,-0.5,0,s3.str().c_str(),1);
 		s4<<"Kurtosis: "<<(g_kurtosis/100000000000.0);	    
 		draw_string(1.5,-1,0,s4.str().c_str(),1);
+		s5<<"Pitch: "<<g_pitch;	    
+		draw_string(1.5,-1.5,0,s5.str().c_str(),1);
 
+		// set the color
+		glColor3f(1.0, 0.25, 0.25);
+		draw_string(0,0.5,0,g_instrument.c_str(),2);
 	
 		
 	x=-2.5;
@@ -796,7 +854,70 @@ void detectSpectralCentroid(float &result, float *spectrum, int n) {
 	xtract[XTRACT_SPECTRAL_CENTROID](spectrum, 2*n, NULL, (float *)&result);
 
 }
+void detectSpectralStandardDeviation(float &result) {
+	// Local Buffer to store stft transform
+	float *m_dataBuffer = (SAMPLE *)malloc(sizeof(SAMPLE)*g_samplesSize);
+	// copy 
+	memcpy(m_dataBuffer, g_samples, sizeof(SAMPLE)*g_samplesSize);
+	// Get stft
+	rfft(m_dataBuffer, g_samplesSize/2, FFT_FORWARD);
+	double mean = 0;
+	for(int i=0;i<g_samplesSize;i+=2) {
+		double val = sqrt(m_dataBuffer[i]*m_dataBuffer[i] + m_dataBuffer[i+1]*m_dataBuffer[i+1]);
+		mean +=val;
+	}
+	mean /=g_samplesSize/2;
+	double stddev = 0;
+	for(int i=0;i<g_samplesSize;i+=2) {
+		double val = sqrt(m_dataBuffer[i]*m_dataBuffer[i] + m_dataBuffer[i+1]*m_dataBuffer[i+1]);
+		stddev +=(val-mean)*(val - mean);
+	}
+	stddev /= g_samplesSize/2;
+	stddev = sqrt(stddev);
+	cout<<"Mean: "<<mean<<" Std Dev: "<<stddev<<endl;
+	result = stddev;
+}
 
+void detectPitch(float &result) {
+	cout<<"Detecting pitch of buffer of size "<<g_samplesSize<<endl;
+	// Local Buffer to store stft transform
+	float *m_dataBuffer = (SAMPLE *)malloc(sizeof(SAMPLE)*g_samplesSize);
+	// copy 
+	memcpy(m_dataBuffer, g_samples, sizeof(SAMPLE)*g_samplesSize);
+	
+	// Track Pitch
+	float *autocorrelationArray = (SAMPLE *)malloc(sizeof(SAMPLE)*g_samplesSize);
+	// memcpy(autocorrelationArray, m_dataBuffer, sizeof(SAMPLE)*g_samplesSize);
+	xtract[XTRACT_AUTOCORRELATION](m_dataBuffer,g_samplesSize, NULL, autocorrelationArray );
+	// get stft
+	rfft(autocorrelationArray, g_samplesSize/2, FFT_FORWARD);
+	// calculate the pitch == frequency with 
+	// the maximum signal in this stft of autocorrelated signal
+	float max = 0;
+	int maxfreq = -1;
+	for( int i = 0; i < g_samplesSize; i+=2 )
+	{
+		double val = sqrt(autocorrelationArray[i]*autocorrelationArray[i] + autocorrelationArray[i+1]*autocorrelationArray[i+1]);
+		if(val > max) {
+			max = val;
+			maxfreq = i/2;
+		}
+	}
+	result = maxfreq;
+}
+
+// void detectSpectralStandardDeviation(float &result, float *spectrum, int n) {
+// 	// the spectrum consists of n amplitudes and n frequencies. So, size 2*n
+// 	float mean;
+// 	xtract[XTRACT_SPECTRAL_MEAN](spectrum, 2*n, NULL, &mean);
+// 	float variance;
+// 	xtract[XTRACT_SPECTRAL_VARIANCE](spectrum, 2*n, &mean, &variance);
+// 	float stddev;
+// 	xtract[XTRACT_SPECTRAL_STANDARD_DEVIATION](spectrum, 2*n, &variance, &stddev);
+// 	result = stddev;
+// 	cout<<"Mean: "<<mean<<" Std Dev: "<<stddev<<endl;
+// 	
+// }
 void detectSpectralKurtosis(float &result, float *spectrum, int n) {
 	// the spectrum consists of n amplitudes and n frequencies. So, size 2*n
 	float mean;
