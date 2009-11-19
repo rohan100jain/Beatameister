@@ -64,6 +64,11 @@
 
 #include "dwt.c"
 
+// OSCPACK
+#include "osc/OscReceivedElements.h"
+#include "osc/OscPacketListener.h"
+#include "ip/UdpSocket.h"
+#include "osc/OscOutboundPacketStream.h"
 
 using namespace std;
 
@@ -134,6 +139,11 @@ bool g_train = true;
 //end rt_lpc globals
 
 SAMPLE * g_dwt;
+
+// osc globals
+UdpTransmitSocket *g_transmitSocket = NULL;
+int SERVERPORT = 8000;
+string g_ADDRESS = "127.0.0.1";
 
 // RtAudio callback function
 int callback_func( void *output_buffer, void *input_buffer, unsigned int nFrames, double streamTime, RtAudioStreamStatus
@@ -323,6 +333,10 @@ int main( int argc, char ** argv )
 	
 	//init lpc
 	initialize_lpc();
+	
+	// initialize osc
+	// Initialize a socket to get a port
+	g_transmitSocket = new UdpTransmitSocket( IpEndpointName( g_ADDRESS.c_str(), SERVERPORT ) );
 	
 	// Start Stream
 	try {
@@ -684,16 +698,31 @@ void displayFunc( )
 		g_shouldCalculateFeatures = false;
 		
 		// Instrument Classification
+		
+		char buffer[1024];
+	    osc::OutboundPacketStream m_p( buffer, 1024 );
+	    // Message to get a port
+	    m_p << osc::BeginBundleImmediate
+			<< osc::BeginMessage( "/play" );
+
+	    
 		if(g_zeroCrossings > g_zcrThreshold) {
 			g_instrument = "snare";
+			m_p<<2;
 		}
 		else {
-			if(g_pitch > g_pitchThreshold)
+			if(g_pitch > g_pitchThreshold) {
 				g_instrument = "midtom";
-			else
+				m_p<<1;
+			}
+			else {
 				g_instrument = "bass";
+				m_p<<0;
+			}
 		}
-		
+		m_p << osc::EndMessage << osc::EndBundle;
+		g_transmitSocket->Send( m_p.Data(), m_p.Size() );
+	    
 	}
 	//glPushMatrix();
 	// Render Features
