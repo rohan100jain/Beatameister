@@ -554,7 +554,7 @@ void displayFunc( )
     // clear the color and depth buffers
     glClear( GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT );
 	
-	
+	static float *spectrum;
 	double x = -4;
 	double xinc = ::fabs(2*x / (g_bufferSize*g_numLastBuffersToSee));
 
@@ -629,16 +629,16 @@ void displayFunc( )
 		for(int i=0;i<g_mMFilters->n_filters;i++)
 			g_mfcc[i] = 0;
 		// Calculate Features
-		detectZeroCrossings(g_zeroCrossings);
-		detectRMSAmplitude(g_rmsAmplitude);
-		float *spectrum = getSpectrum();
+		// detectZeroCrossings(g_zeroCrossings);
+		// detectRMSAmplitude(g_rmsAmplitude);
+		spectrum = getSpectrum();
 		int n = g_samplesSize/2;
-		detectRollOff(g_rolloff, spectrum, n);
+		// detectRollOff(g_rolloff, spectrum, n);
 		detectSpectralCentroid(g_centroid, spectrum, n);
-		detectSpectralKurtosis(g_kurtosis, spectrum, n);
-		detectMFCC(g_mfcc, spectrum, n);
-		calculate_dwt();
-		calculate_lpc();
+		// detectSpectralKurtosis(g_kurtosis, spectrum, n);
+		// detectMFCC(g_mfcc, spectrum, n);
+		// calculate_dwt();
+		// calculate_lpc();
 		g_shouldCalculateFeatures = false;
 		
 	}
@@ -656,7 +656,7 @@ void displayFunc( )
 		draw_string(1.5,0,0,s2.str().c_str(),1);
 		s3<<"Centroid: "<<g_centroid;	    
 		draw_string(1.5,-0.5,0,s3.str().c_str(),1);
-		s4<<"Kurtosis: "<<g_kurtosis;	    
+		s4<<"Kurtosis: "<<(g_kurtosis/100000000000.0);	    
 		draw_string(1.5,-1,0,s4.str().c_str(),1);
 
 	
@@ -764,7 +764,7 @@ void displayFunc( )
 
 float * getSpectrum( ) {
 	
-	float *result = (float *)malloc(sizeof(float)*g_samplesSize*2);
+	float *result = (float *)malloc(sizeof(float)*g_samplesSize);
 	float argv[3];
 	argv[0] = (float)MY_FREQ/g_samplesSize;
 	argv[1] = (float)XTRACT_MAGNITUDE_SPECTRUM;
@@ -785,30 +785,35 @@ void detectRMSAmplitude(float &result) {
 }
 
 void detectRollOff(float &result, float *spectrum, int n) {
-	float argv[2] = {MY_FREQ/n, 70};
+	// the spectrum consists of n amplitudes and n frequencies. So, size 2*n
+	float argv[2] = {(float)MY_FREQ/n, 0.85};
 	xtract[XTRACT_ROLLOFF](spectrum, n, argv, &result);
+	result = spectrum[n + (int)result];
 }
 
 void detectSpectralCentroid(float &result, float *spectrum, int n) {
-	xtract[XTRACT_SPECTRAL_CENTROID](spectrum+n, n, NULL, &result);
+
+	xtract[XTRACT_SPECTRAL_CENTROID](spectrum, 2*n, NULL, (float *)&result);
+
 }
 
 void detectSpectralKurtosis(float &result, float *spectrum, int n) {
+	// the spectrum consists of n amplitudes and n frequencies. So, size 2*n
 	float mean;
-	xtract[XTRACT_SPECTRAL_MEAN](spectrum+n, n, NULL, &mean);
+	xtract[XTRACT_SPECTRAL_MEAN](spectrum, 2*n, NULL, &mean);
 	float variance;
-	xtract[XTRACT_SPECTRAL_VARIANCE](spectrum+n, n, &mean, &variance);
+	xtract[XTRACT_SPECTRAL_VARIANCE](spectrum, 2*n, &mean, &variance);
 	float stddev;
-	xtract[XTRACT_SPECTRAL_STANDARD_DEVIATION](spectrum+n, n, &variance, &stddev);
+	xtract[XTRACT_SPECTRAL_STANDARD_DEVIATION](spectrum, 2*n, &variance, &stddev);
 	cout<<"Mean: "<<mean<<" Std Dev: "<<stddev<<endl;
 	float argv[2] = {mean, stddev};	
-	xtract[XTRACT_SPECTRAL_KURTOSIS](spectrum, n, argv, &result);
+	xtract[XTRACT_SPECTRAL_KURTOSIS](spectrum, 2*n, argv, &result);
 }
 
 void initMFCC() {
-	int winSize = g_samplesSize; // TODO: Change to sth sane
+	int winSize = 128; // TODO: Change to sth sane
 	g_mMFilters = new xtract_mel_filter();
-	g_mMFilters->n_filters = 20;
+	g_mMFilters->n_filters = 2;
 	g_mMFilters->filters = (float **)malloc(sizeof(float*)*g_mMFilters->n_filters);
 	for(int n = 0; n < g_mMFilters->n_filters; n++) {
 		g_mMFilters->filters[n] = (float *)malloc(sizeof(float)*winSize);
@@ -816,14 +821,19 @@ void initMFCC() {
 	// xtract_init_mfcc(gGlobals->mBlockSize, gGlobals->mFrameRate/2.0f,  
 	// XTRACT_EQUAL_GAIN,80.0f, 18000.0f,
 	//                      mMFilters->n_filters, mMFilters->filters);
-	xtract_init_mfcc(g_samplesSize, MY_FREQ/2.0f, XTRACT_EQUAL_AREA,80.0f, 18000.0f, g_mMFilters->n_filters, g_mMFilters->filters);
+	xtract_init_mfcc(g_samplesSize, MY_FREQ/2.0f, XTRACT_EQUAL_GAIN,80.0f, 18000.0f, g_mMFilters->n_filters, g_mMFilters->filters);
 	
 	g_mfcc = (float *)malloc(sizeof(float)*g_mMFilters->n_filters);
 	
 }
 void detectMFCC(float *result, float *spectrum, int n) {
+	// the spectrum consists of n amplitudes and n frequencies. So, size 2*n
 	cout<<"Extracting MFCC"<<endl;
 	xtract[XTRACT_MEL_COEFFS](spectrum, n, g_mMFilters, result);
+	for(int i=0;i<g_mMFilters->n_filters;i++) {
+		cout<<result[i]<<" ";
+	}
+	cout<<endl;
 }
 
 void initialize_lpc( )

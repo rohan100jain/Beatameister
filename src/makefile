@@ -8,8 +8,8 @@ LIBS=-framework CoreAudio -framework CoreMIDI -framework CoreFoundation \
 	-framework IOKit -framework Carbon  -framework OpenGL \
 	-framework GLUT -framework Foundation \
 	-framework AppKit -lstdc++ \
-	-L/usr/local/lib/ \
-	libxtract.0.dylib -lm -lfftw3f
+	-L/opt/local/lib/ \
+	/usr/local/lib/libxtract.0.dylib -lm -lfftw3f
 
 OBJS=   RtAudio.o chuck_fft.o Beatameister.o lpc.o Thread.o Stk.o midiio_osx.o
 
