@@ -100,7 +100,7 @@ float *g_mfcc;
 
 string g_instrument = "";
 // zcr threshold
-double g_zcrThreshold = 0.1;
+double g_zcrThreshold = 0.1, g_pitchThreshold = 25;
 // Samples for feature extraction
 SAMPLE * g_samples;
 int g_samplesSize = 0;
@@ -688,7 +688,7 @@ void displayFunc( )
 			g_instrument = "snare";
 		}
 		else {
-			if(g_pitch > 30)
+			if(g_pitch > g_pitchThreshold)
 				g_instrument = "midtom";
 			else
 				g_instrument = "bass";
