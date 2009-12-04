@@ -12,6 +12,7 @@
 #include "RtAudio.h"
 #include "Drummer.h"
 #include "Voicer.h"
+#include "FileWvIn.h";
 
 #define ADDRESS "127.0.0.1"
 #define PORT 8000
@@ -33,6 +34,9 @@ Voicer *g_voicer = NULL;
 
 int g_instruments[4] = {36, 45, 38, 42};
 
+// file in
+FileWvIn g_fin;
+
 // callback function
 int callback_func( void *output_buffer, void *input_buffer, unsigned int nFrames, double streamTime, RtAudioStreamStatus
  status, void *user_data ) {
@@ -41,7 +45,7 @@ int callback_func( void *output_buffer, void *input_buffer, unsigned int nFrames
 	memset( new_buffer, 0, nFrames * sizeof(SAMPLE));
 	// add it to accumulate
 	for(int j=0;j<nFrames;j++) {
-		new_buffer[j] = g_voicer->tick();
+		new_buffer[j] = g_voicer->tick() + g_fin.tick();
 	}
 	return 0;
 }
@@ -54,6 +58,7 @@ protected:
     virtual void ProcessMessage( const osc::ReceivedMessage& m, 
 				const IpEndpointName& remoteEndpoint )
     {
+		std::cout<<"Got Message"<<std::endl;
 	    try{
 			if( strcmp( m.AddressPattern(), "/play" ) == 0 ){
 				
@@ -108,6 +113,20 @@ int main(int argc, char* argv[])
 		err.printMessage();
 		exit(1);
 	}
+	
+	try 
+    {
+        // read the file
+        g_fin.openFile( "TomVega.wav" );
+        // change the rate
+        g_fin.setRate( 1 );
+		// normalize the peak
+		g_fin.normalize();
+    } catch( StkError & e )
+    {
+        cerr << "baaaaaaaaad..." << endl;
+        return 1;
+    }
 	
 	// Alocate Drum Voice
 	g_voicer = new Voicer();

@@ -27,7 +27,7 @@ OBJS2 = SynthesisEngine.o RtAudio.o
 all:Beatameister SynthesisEngine
 
 Beatameister: $(OBJS)
-	$(CXX) -o Beatameister $(OBJS) $(OSCPACK_OBJS) $(LIBS)
+	$(CXX) -o Beatameister $(OBJS) $(STK_OBJS) $(OSCPACK_OBJS) $(LIBS)
 
 SynthesisEngine: $(OBJS2)
 	$(CXX) -o SynthesisEngine $(OBJS2) $(STK_OBJS) $(OSCPACK_OBJS) $(LIBS)

@@ -70,6 +70,7 @@
 #include "ip/UdpSocket.h"
 #include "osc/OscOutboundPacketStream.h"
 
+
 using namespace std;
 
 #define MY_FREQ 44100
@@ -105,7 +106,7 @@ float *g_mfcc;
 
 string g_instrument = "";
 // zcr threshold
-double g_zcrThreshold = 0.1, g_pitchThreshold = 25;
+double g_zcrThreshold = 0.1, g_pitchThreshold = 23;
 // Samples for feature extraction
 SAMPLE * g_samples;
 int g_samplesSize = 0;
@@ -145,10 +146,15 @@ UdpTransmitSocket *g_transmitSocket = NULL;
 int SERVERPORT = 8000;
 string g_ADDRESS = "127.0.0.1";
 
+
 // RtAudio callback function
 int callback_func( void *output_buffer, void *input_buffer, unsigned int nFrames, double streamTime, RtAudioStreamStatus
  status, void *user_data ) {
 	SAMPLE * old_buffer = (SAMPLE *)input_buffer;
+	SAMPLE * new_buffer = (SAMPLE *)output_buffer;
+//	for(int i=0;i<nFrames;i++) {
+//		new_buffer[i] = g_fin.tick();
+//	}
 	// Local Buffer
 	float *m_buffer = (SAMPLE *)malloc(sizeof(SAMPLE)*g_bufferSize);
 	// copy 
@@ -174,12 +180,13 @@ int callback_func( void *output_buffer, void *input_buffer, unsigned int nFrames
 		g_numBuffersSeen = 0;	
 		g_start = g_sampleBuffers.size();
 		cout<<"Started Recording Automatically"<<endl;
-			
+		g_instrument = "";
 	}
 		
 	if(g_recording) {
-		if(sum<g_energyThreshold)
+		if(sum<g_energyThreshold) {
 			g_recording = false;
+		}
 		else {
 		if(g_numBuffersSeen == 0) {
 			g_samplesSize = 0;
@@ -337,6 +344,23 @@ int main( int argc, char ** argv )
 	// initialize osc
 	// Initialize a socket to get a port
 	g_transmitSocket = new UdpTransmitSocket( IpEndpointName( g_ADDRESS.c_str(), SERVERPORT ) );
+	
+//    // Set the global sample rate before creating class instances.
+//    Stk::setSampleRate( 44100.0 );
+//	// Read In File
+//	try 
+//    {
+//        // read the file
+//        g_fin.openFile( "TomVega.wav" );
+//        // change the rate
+//        g_fin.setRate( 1 );
+//		// normalize the peak
+//		g_fin.normalize();
+//    } catch( stk::StkError & e )
+//    {
+//        cerr << "baaaaaaaaad..." << endl;
+//        return 1;
+//    }
 	
 	// Start Stream
 	try {
@@ -722,7 +746,7 @@ void displayFunc( )
 		}
 		m_p << osc::EndMessage << osc::EndBundle;
 		g_transmitSocket->Send( m_p.Data(), m_p.Size() );
-	    
+	std:cout<<"Sent Message"<<std::endl;
 	}
 	//glPushMatrix();
 	// Render Features
