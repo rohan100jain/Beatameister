@@ -30,8 +30,8 @@ using namespace std;
 using namespace stk;
 RtAudio *g_dac = 0;
 
-Voicer *g_voicer = NULL;
-
+//Voicer *g_voicer = NULL;
+Drummer *g_drummer = NULL;
 int g_instruments[4] = {36, 45, 38, 42};
 
 // file in
@@ -45,7 +45,8 @@ int callback_func( void *output_buffer, void *input_buffer, unsigned int nFrames
 	memset( new_buffer, 0, nFrames * sizeof(SAMPLE));
 	// add it to accumulate
 	for(int j=0;j<nFrames;j++) {
-		new_buffer[j] = g_voicer->tick() + g_fin.tick();
+		new_buffer[j] = g_drummer->tick();
+		//+ g_fin.tick()/3;
 	}
 	return 0;
 }
@@ -66,8 +67,8 @@ protected:
 				int id = (arg++)->AsInt32();
 				// get note
 				StkFloat note = g_instruments[id];
-				std::cout<<"Trying to strike! "<<note<<std::endl;
-				g_voicer->noteOn( note, 127);
+				std::cout<<"Trying to strike! "<<note<<std::endl;				
+				g_drummer->noteOn( note, 1.0);
             }
 			
 		}catch( osc::Exception& e ){
@@ -84,7 +85,7 @@ protected:
 int main(int argc, char* argv[])
 {
 	// Set the global sample rate before creating class instances.
-  	Stk::setSampleRate( 44100.0 );
+  	Stk::setSampleRate( 44100 );
   	Stk::showWarnings( true );
   	Stk::setRawwavePath( "stk-4.4.1/rawwaves/" );
   
@@ -117,7 +118,7 @@ int main(int argc, char* argv[])
 	try 
     {
         // read the file
-        g_fin.openFile( "TomVega.wav" );
+        g_fin.openFile( "02 Duran duran.wav" );
         // change the rate
         g_fin.setRate( 1 );
 		// normalize the peak
@@ -129,17 +130,26 @@ int main(int argc, char* argv[])
     }
 	
 	// Alocate Drum Voice
-	g_voicer = new Voicer();
+//	g_voicer = new Voicer();
 	
+	g_drummer = new Drummer();
 	// Initial Drummer
-	Drummer *m_drummer = new Drummer();
-	g_voicer->addInstrument(m_drummer);
-	Drummer *m_drummer2 = new Drummer();
-	g_voicer->addInstrument(m_drummer2);
-	Drummer *m_drummer3 = new Drummer();
-	g_voicer->addInstrument(m_drummer3);
-	Drummer *m_drummer4 = new Drummer();
-	g_voicer->addInstrument(m_drummer4);
+//	Drummer *m_drummer = new Drummer();
+//	g_voicer->addInstrument(m_drummer);
+//	Drummer *m_drummer2 = new Drummer();
+//	g_voicer->addInstrument(m_drummer2);
+//	Drummer *m_drummer3 = new Drummer();
+//	g_voicer->addInstrument(m_drummer3);
+//	Drummer *m_drummer4 = new Drummer();
+//	g_voicer->addInstrument(m_drummer4);
+//	Drummer *m_drummer5 = new Drummer();
+//	g_voicer->addInstrument(m_drummer5);
+//	Drummer *m_drummer6 = new Drummer();
+//	g_voicer->addInstrument(m_drummer6);
+//	Drummer *m_drummer7 = new Drummer();
+//	g_voicer->addInstrument(m_drummer7);
+//	Drummer *m_drummer8 = new Drummer();
+//	g_voicer->addInstrument(m_drummer8);
 	
 	// Start Listening For Clients
 	MainPacketListener listener;

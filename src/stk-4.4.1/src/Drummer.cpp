@@ -87,9 +87,9 @@ void Drummer :: noteOn( StkFloat instrument, StkFloat amplitude )
   }
 
   // Yes, this is tres kludgey.
-  // int noteNumber = instrument;
-  int noteNumber = (int) ( ( 12 * log( instrument / 220.0 ) / log( 2.0 ) ) + 57.01 );
-  // std::cout << "Drummer::NoteOn: note = " << noteNumber << ", amplitude = " << amplitude << '.'<<std::endl;
+  int noteNumber = instrument;
+  //int noteNumber = (int) ( ( 12 * log( instrument / 220.0 ) / log( 2.0 ) ) + 57.01 );
+  std::cout << "Drummer::NoteOn: note = " << noteNumber << ", amplitude = " << amplitude << '.'<<std::endl;
 
   // If we already have a wave of this note number loaded, just reset
   // it.  Otherwise, look first for an unused wave or preempt the
