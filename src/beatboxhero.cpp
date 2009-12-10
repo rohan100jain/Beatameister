@@ -16,15 +16,23 @@
 #include <math.h>
 #include <stdio.h>
 #include <vector>
+#include <assert.h>
+#include <string.h>
+#include <queue>
 #include <map>
 #include <iostream>
 #include <sstream>
 #include <fstream>
 #include <sys/time.h>
-// Mac OS X
+
+//music processing
+#include "chuck_fft.h"
+#include "xtract/libxtract.h"
+
+// OpenGL
 #include <GLUT/glut.h>
-// other platforms
-// #include <GL/glut.h>
+#include <OpenGL/gl.h>
+#include <OpenGL/glu.h>
 
 // Stk
 #include "RtAudio.h"
@@ -33,34 +41,130 @@
 // RtAudio #defs
 #define MY_FREQ 44100
 #define MY_PIE 3.14159265358979
-#define SAMPLE double
+#define SAMPLE float
 
 using namespace std;
 using namespace stk;
 
+// playing back
 long g_time;
 vector<int> g_instruments;
 RtAudio *g_dac = 0;
 Drummer *g_drummer = NULL;
 
+//beat map stuff
 map<long,int> g_beatMap;
 map<long,int>::iterator g_mapIter;
+
+// Constants that can be changed via the keyboard
+int g_numLastBuffersToSee = 100;
+int g_numLastBuffersToUse = 2;
+
+// Threshold on RMS Energy to start recording
+double g_energyThreshold = 0.01;
+
+//recording sample globals
+vector<SAMPLE *> g_sampleBuffers;
+int g_sampleBuffersSize = 400;
+int g_numMaxBuffersToUse = 100;
+long g_bufferSize; // size of buffer in samples
+SAMPLE * g_samples;
+int g_samplesSize = 0;
+int g_numBuffersSeen = 0;
+int g_start = 0;
+
+// Am I recording?
+bool g_recording = false;
+
+// Should opengl thread extract features
+bool g_shouldCalculateFeatures = false;
+
+// Features and instrument
+float g_zeroCrossings = 0, g_centroid = 0, g_pitch = 0;
+string g_instrument = "";
+int g_instrumentId = -1;
+
+// zcr threshold
+double g_zcrThreshold = 0.1, g_pitchThreshold = 1.1;
 
 //-----------------------------------------------------------------------------
 // callback function
 //-----------------------------------------------------------------------------
 int callback_func( void *output_buffer, void *input_buffer, unsigned int nFrames, double streamTime, RtAudioStreamStatus
 				  status, void *user_data ) {
+	SAMPLE * old_buffer = (SAMPLE *)input_buffer;
 	SAMPLE * new_buffer = (SAMPLE *)output_buffer;
-	// zero it out
-	memset( new_buffer, 0, nFrames * sizeof(SAMPLE));
-	// add it to accumulate
-	for(int j=0;j<nFrames;j++) {
-		new_buffer[j] = g_drummer->tick();
-		//+ g_fin.tick()/3;
+	for(int i=0;i<nFrames;i++) {
+		new_buffer[i] =  g_drummer->tick();
 	}
-	return 0;
+	// Local Buffer
+	float *m_buffer = (SAMPLE *)malloc(sizeof(SAMPLE)*g_bufferSize);
+	// copy 
+	memcpy(m_buffer, old_buffer, sizeof(SAMPLE)*g_bufferSize);
+	if(g_sampleBuffers.size() == g_sampleBuffersSize) {
+		g_sampleBuffers.erase(g_sampleBuffers.begin());
+		g_start--;
+	}
+	g_sampleBuffers.push_back(m_buffer);
+	// detect energy via RMS
+	float sum = 0;	
+	float ratio = 0;
+	for( int i = 0; i < nFrames; i++ )
+    {
+		sum+= m_buffer[i]*m_buffer[i];
+    }
+	sum/=nFrames;
+	sum = sqrt(sum);
+	
+	// cout<<sum<<endl;
+	if(!g_recording && sum>g_energyThreshold) {
+		// Start Recording
+		g_recording = true;
+		g_numBuffersSeen = 0;	
+		g_start = g_sampleBuffers.size()-1;
+		cout<<"Started Recording Automatically"<<endl;
+		g_instrument = "";
+		g_instrumentId = -1;
+	}
+	
+	if(g_recording) {
+		if(sum<g_energyThreshold) {
+			g_recording = false;
+		}
+		else {
+			if(g_numBuffersSeen == 0) {
+				g_samplesSize = 0;
+			}
+			if(g_numBuffersSeen < g_numLastBuffersToUse) {
+				for( int i = 0; i < nFrames; i++ )
+				{
+					// Do Something
+					g_samples[g_samplesSize] = m_buffer[i];
+					g_samplesSize++;
+				}
+			}
+			g_numBuffersSeen++;
+			// cout<<g_numBuffersSeen<<endl;
+			if(g_numBuffersSeen == g_numLastBuffersToUse) {
+				// g_recording = false;
+				// g_numBuffersSeen = 0;
+				g_shouldCalculateFeatures = true;
+				// cout<<"Now it should calculate features"<<endl;
+			}
+		}
+	}
+    
+	return 0;	
 }
+
+//-----------------------------------------------------------------------------
+// feature detection function prototypes
+//-----------------------------------------------------------------------------
+float * getSpectrum(  SAMPLE * samples, int samplesSize);
+void init_beatsMap();
+void detectZeroCrossings(  SAMPLE * samples, int samplesSize, float& );
+void detectPitch( SAMPLE * samples, int samplesSize, float &result);
+void detectSpectralCentroid(float &result, float *spectrum, int n);
 
 //-----------------------------------------------------------------------------
 // function prototypes
@@ -71,9 +175,6 @@ void reshapeFunc( GLsizei width, GLsizei height );
 void keyboardFunc( unsigned char, int, int );
 void mouseFunc( int button, int state, int x, int y );
 void initialize( );
-
-
-
 
 //-----------------------------------------------------------------------------
 // global variables and #defines
@@ -91,9 +192,6 @@ GLsizei g_height = 600;
 
 // light 0 position
 GLfloat g_light0_pos[4] = { 2.0f, 8.2f, 4.0f, 1.0f };
-
-
-
 
 //-----------------------------------------------------------------------------
 // Name: main( )
@@ -172,12 +270,18 @@ int main( int argc, char ** argv )
 	outputStreamParams.deviceId = g_dac->getDefaultOutputDevice();
 	outputStreamParams.nChannels = 1;
 	
+	// Input Stream Parameters
+	RtAudio::StreamParameters inputStreamParams;
+	inputStreamParams.deviceId = g_dac->getDefaultInputDevice();
+	inputStreamParams.nChannels = 1;
+	
+	
 	// Get RtAudio Stream
 	try {
 		g_dac->openStream(
 						  &outputStreamParams,
-						  NULL,
-						  RTAUDIO_FLOAT64,
+						  &inputStreamParams,
+						  RTAUDIO_FLOAT32,
 						  MY_FREQ,
 						  &buffer_size,
 						  callback_func,
@@ -188,6 +292,10 @@ int main( int argc, char ** argv )
 		err.printMessage();
 		exit(1);
 	}
+	// Samples for Feature Extraction in a Buffer
+	g_bufferSize = buffer_size;
+	g_samples = (SAMPLE *)malloc(sizeof(SAMPLE)*g_bufferSize*g_numMaxBuffersToUse);
+	
 	g_drummer = new Drummer();
 	// Start Stream
 	try {
@@ -245,9 +353,6 @@ void initialize()
 	
 }
 
-
-
-
 //-----------------------------------------------------------------------------
 // Name: reshapeFunc( )
 // Desc: called when window size changes
@@ -273,9 +378,6 @@ void reshapeFunc( GLsizei w, GLsizei h )
     gluLookAt( 0.0f, 0.0f, 10.0f, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f );
 }
 
-
-
-
 //-----------------------------------------------------------------------------
 // name: rand2f()
 // desc: generate a random float
@@ -284,9 +386,6 @@ GLfloat rand2f( float a, float b )
 {
     return a + (b-a)*(rand() / (GLfloat)RAND_MAX);
 }
-
-
-
 
 //-----------------------------------------------------------------------------
 // Name: keyboardFunc( )
@@ -300,13 +399,50 @@ void keyboardFunc( unsigned char key, int x, int y )
         case 'q':
             exit(1);
             break;
+		case 'z':
+			if(g_numLastBuffersToSee < g_sampleBuffersSize) {
+				g_numLastBuffersToSee++;
+				cout<<"Increasing Window of Visualization to "<<g_numLastBuffersToSee<<endl;
+			}
+			else {
+				cout<<"Can't increase Window of Visualization further. Max reached! "<<endl;
+			}
+			break;
+		case 'x':
+			if(g_numLastBuffersToSee > 2) {
+				g_numLastBuffersToSee--;
+				cout<<"Decreasing Window of Visualization to "<<g_numLastBuffersToSee<<endl;
+			}
+			else {
+				cout<<"Can't Further Decrease Window from "<<g_numLastBuffersToSee<<endl;
+			}
+			break;
+		case 'a':
+			if(g_numLastBuffersToUse < g_numMaxBuffersToUse) {
+				g_numLastBuffersToUse++;
+				cout<<"Increasing Number of previous buffers to use for feature extraction to "<<g_numLastBuffersToUse<<endl;
+			}
+			else {
+				cout<<"Can't Increase Number of previous buffers to use for feature extraction. Max Reached"<<endl;
+			}
+			break;
+		case 's':
+			if(g_numLastBuffersToUse > 2) {
+				g_numLastBuffersToUse--;
+				cout<<"Decreasing Number of previous buffers to use for feature extraction to "<<g_numLastBuffersToUse<<endl;
+			}
+			else {
+				cout<<"Can't Further Decrease Number of previous buffers to use for feature extraction from "<<g_numLastBuffersToUse<<endl;
+			}
+			break;
+		case 'g':
+			g_recording = true;
+			g_start = g_sampleBuffers.size();
+			cout<<"Started Recording"<<endl;
+			break;
     }
-    
-    glutPostRedisplay( );
+    glutPostRedisplay( );	
 }
-
-
-
 
 //-----------------------------------------------------------------------------
 // Name: mouseFunc( )
@@ -337,9 +473,6 @@ void mouseFunc( int button, int state, int x, int y )
     
     glutPostRedisplay( );
 }
-
-
-
 
 //-----------------------------------------------------------------------------
 // Name: idleFunc( )
@@ -374,24 +507,24 @@ void draw_string( GLfloat x, GLfloat y, GLfloat z, const char * str, GLfloat sca
 
 int g_windowSize = 2500;
 int g_displacementFromBottom = 400;
-int g_hitSize = 300;
+int g_hitSize = 400;
 vector<long> hits;
+
 //-----------------------------------------------------------------------------
 // Name: displayFunc( )
 // Desc: callback function invoked to draw the client area
 //-----------------------------------------------------------------------------
 void displayFunc( )
 {
-    static GLfloat x = 4, y = 4.5, z = -20;
-	
+	glClear( GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT );
+	static float *spectrum;
+	GLfloat x = 4, y = 4.5, z = -20;
+
 	timeval time;
 	gettimeofday(&time, NULL);
 	long t = (time.tv_sec * 1000) + (time.tv_usec / 1000) - g_time;
 	
-    // clear the color and depth buffers
-    glClear( GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT );
-
-	GLfloat xinc = 2.0*x/g_instruments.size();
+	double xinc = 2.0*x/g_instruments.size();
 
 	// Draw Lines
 	// push
@@ -411,10 +544,65 @@ void displayFunc( )
 	static bool doesHit = false;
 	// Draw spheres
 	long start = t + g_windowSize - g_displacementFromBottom;
-	if(t%2 == 0)
-		doesHit = true;
-	else
-		doesHit = false;
+	g_instrumentId = -1;
+	if(g_shouldCalculateFeatures) {
+		cout<<"Calculating features"<<endl;
+		// Reset Features
+		g_zeroCrossings = 0;
+		g_centroid = 0;
+		g_pitch = 0.0;
+		// Local Buffer
+		float *m_dataBuffer = (SAMPLE *)malloc(sizeof(SAMPLE)*g_samplesSize);
+		// copy 
+		memcpy(m_dataBuffer, g_samples, sizeof(SAMPLE)*g_samplesSize);		
+		int m_samplesSize = g_samplesSize;
+		// Calculate Features
+		detectZeroCrossings(m_dataBuffer, m_samplesSize,  g_zeroCrossings);
+		spectrum = getSpectrum(m_dataBuffer, m_samplesSize);
+		int n = g_samplesSize/2;
+		detectSpectralCentroid(g_centroid, spectrum, n);
+		detectPitch(m_dataBuffer, m_samplesSize, g_pitch);
+		g_shouldCalculateFeatures = false;
+		
+		if(g_zeroCrossings > g_zcrThreshold) {
+			if(g_centroid < 6000) {
+				g_instrument = "snare";
+				g_instrumentId = 2;
+			}
+			else {
+				g_instrument = "hihat";
+				g_instrumentId = 3;
+			}
+		}
+		else {
+			if(g_pitch > g_pitchThreshold) {
+				g_instrument = "midtom";
+				g_instrumentId = 1;
+			}
+			else {
+				g_instrument = "bass";
+				g_instrumentId = 0;
+			}
+		}
+	}
+	
+	/*ostringstream s,s1,s2,s3,s4,s5,s6,s7;
+	s<<"Zero Crossing Rate: "<<g_zeroCrossings;	    
+	draw_string(1.5,1,0,s.str().c_str(),1);
+	s5<<"Pitch: "<<g_pitch;	    
+	draw_string(1.5,-1.5,0,s5.str().c_str(),1);
+	s7<<"Spectral Centroid: "<<g_centroid;	    
+	draw_string(1.5,-2.5,0,s7.str().c_str(),1);
+	*/
+	// set the color
+	glColor3f(1.0, 0.25, 0.25);
+	draw_string(0,0.5,0,g_instrument.c_str(),2);
+	
+	
+//	if(t%2 == 0)
+//		doesHit = true;
+//	else
+//		doesHit = false;
 	
 	
 	glPushMatrix();
@@ -430,6 +618,7 @@ void displayFunc( )
 		draw_string(-1*x+3.2*xinc,-1*y+0.2,0,"Chi",3);
 
 	glPopMatrix();
+	
 	while(g_mapIter != g_beatMap.end()) {
 		long key = g_mapIter->first;
 		int beat = g_mapIter->second;
@@ -452,7 +641,7 @@ void displayFunc( )
 		
 		if(key >= t - g_hitSize/2 && key <= t+g_hitSize/2) {
 			if(find(hits.begin(), hits.end(), key) == hits.end()) {
-				if(doesHit) {
+				if(g_instrumentId == beat) {
 					glColor3f(0.8,0.8,0.8 );
 					draw_string(-1*x-1,0,0,"hit",5);
 					hits.push_back(key);
@@ -468,7 +657,7 @@ void displayFunc( )
 				radius = 0.5;
 			}
 		}
-
+		
 //		std::cout<<key<<" "<<t<<" "<<radius<<std::endl;
 		glTranslatef(-1*x + (beat + 0.5)*xinc, y - (start-key)*2*y/2500 , 0);
 		glutSolidSphere(radius,25,25);
@@ -476,7 +665,111 @@ void displayFunc( )
 		glPopMatrix();
 	}
 	g_mapIter = g_beatMap.begin();
+	
+	x=-4;
+	xinc = ::fabs(2*x / (g_bufferSize*g_numLastBuffersToSee));
+	y=3;
+	// push
+	glPushMatrix();
+	// set the color
+	glColor3f(0.25, 0.25, 1.0);
+	// draw the center line
+	glBegin( GL_LINE_STRIP );
+	glVertex3f( x, y , 0);
+	glVertex3f( -1*x, y , 0);
+	glEnd();
+	
+	// Visualize the last g_numLastBuffersToSee buffers
+	for(int j=g_sampleBuffers.size()-g_numLastBuffersToSee;j<g_sampleBuffers.size();j++) {
+		
+		if(j>=g_start && j<g_start + g_numLastBuffersToUse) {
+			// Change Color since this buffer is used for feature detection
+			glColor3f(0.25, 1.0, 0.25);				
+		}
+		else {
+			// Reset Color
+			glColor3f(0.25, 0.25, 1.0);				
+		}
+		// Draw the lines		
+		glBegin( GL_LINE_STRIP );
+		for( int i = 0; i < g_bufferSize; i++) {
+			// set the next vertex
+			glVertex3f( x, y+ 3*g_sampleBuffers[j][i] ,0);
+			// increment x
+			x += xinc;
+		}
+		glEnd();
+		
+	}
+    // pop
+	glPopMatrix();
+	
     // flush and swap
     glFlush( );
     glutSwapBuffers( );
 }
+
+
+// ---------------------------------------
+// Feature Detecting Functions
+// ---------------------------------------
+
+float * getSpectrum( SAMPLE * samples, int samplesSize) {
+	
+	float *result = (float *)malloc(sizeof(float)*samplesSize);
+	float argv[3];
+	argv[0] = (float)MY_FREQ/samplesSize;
+	argv[1] = (float)XTRACT_MAGNITUDE_SPECTRUM;
+	argv[2] = 0.0;
+	xtract[XTRACT_SPECTRUM](samples, samplesSize, argv, result);
+	return result;
+}
+
+void detectZeroCrossings( SAMPLE * samples, int samplesSize, float &result) {
+	// Local Buffer
+	float *m_dataBuffer = (SAMPLE *)malloc(sizeof(SAMPLE)*samplesSize);
+	// copy 
+	memcpy(m_dataBuffer, samples, sizeof(SAMPLE)*samplesSize);
+	float mean;
+	xtract[XTRACT_MEAN](m_dataBuffer, samplesSize, NULL, &mean);
+	for(int i=0;i<samplesSize;i++) {
+		m_dataBuffer[i] -= mean;
+	}
+	xtract[XTRACT_ZCR](m_dataBuffer,samplesSize, NULL, &result );
+	cout<<"Extracting Zero Crossing Rate from buffer of size "<<samplesSize<<": "<<result<<endl;
+}
+
+
+void detectSpectralCentroid(float &result, float *spectrum, int n) {
+	xtract[XTRACT_SPECTRAL_CENTROID](spectrum, 2*n, NULL, (float *)&result);
+}
+
+
+void detectPitch( SAMPLE * samples, int samplesSize, float &result) {
+	cout<<"Detecting pitch of buffer of size "<<samplesSize<<endl;
+	// Local Buffer to store stft transform
+	float *m_dataBuffer = (SAMPLE *)malloc(sizeof(SAMPLE)*samplesSize);
+	// copy 
+	memcpy(m_dataBuffer, samples, sizeof(SAMPLE)*samplesSize);
+	
+	// Track Pitch
+	float *autocorrelationArray = (SAMPLE *)malloc(sizeof(SAMPLE)*samplesSize);
+	// memcpy(autocorrelationArray, m_dataBuffer, sizeof(SAMPLE)*samplesSize);
+	xtract[XTRACT_AUTOCORRELATION](m_dataBuffer,samplesSize, NULL, autocorrelationArray );
+	// get stft
+	rfft(autocorrelationArray, samplesSize/2, FFT_FORWARD);
+	// calculate the pitch == frequency with 
+	// the maximum signal in this stft of autocorrelated signal
+	float max = 0;
+	int maxfreq = -1;
+	for( int i = 0; i < samplesSize; i+=2 )
+	{
+		double val = sqrt(autocorrelationArray[i]*autocorrelationArray[i] + autocorrelationArray[i+1]*autocorrelationArray[i+1]);
+		if(val > max) {
+			max = val;
+			maxfreq = i/2;
+		}
+	}
+	result = 100*(float)maxfreq/(float)samplesSize;
+}
+
