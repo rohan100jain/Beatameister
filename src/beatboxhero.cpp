@@ -37,6 +37,7 @@
 // Stk
 #include "RtAudio.h"
 #include "Drummer.h"
+#include "FileWvIn.h";
 
 // RtAudio #defs
 #define MY_FREQ 44100
@@ -46,8 +47,12 @@
 using namespace std;
 using namespace stk;
 
+int g_hackIndex = 0;
 // playing back
 long g_time;
+// file in
+FileWvIn g_fin;
+
 vector<int> g_instruments;
 RtAudio *g_dac = 0;
 Drummer *g_drummer = NULL;
@@ -60,9 +65,6 @@ map<long,int>::iterator g_mapIter;
 int g_numLastBuffersToSee = 100;
 int g_numLastBuffersToUse = 2;
 
-// Threshold on RMS Energy to start recording
-double g_energyThreshold = 0.01;
-
 //recording sample globals
 vector<SAMPLE *> g_sampleBuffers;
 int g_sampleBuffersSize = 400;
@@ -74,7 +76,9 @@ int g_numBuffersSeen = 0;
 int g_start = 0;
 
 // Am I recording?
-bool g_recording = false;
+bool g_recording = false, g_recording1 = false, g_recording2 = false, firstTime = false;
+// Threshold on RMS Energy to start recording
+double g_energyThreshold1 = 0.02, g_energyThreshold2 = 0.9, g_ratioThreshold = 100;
 
 // Should opengl thread extract features
 bool g_shouldCalculateFeatures = false;
@@ -92,10 +96,20 @@ double g_zcrThreshold = 0.1, g_pitchThreshold = 1.1;
 //-----------------------------------------------------------------------------
 int callback_func( void *output_buffer, void *input_buffer, unsigned int nFrames, double streamTime, RtAudioStreamStatus
 				  status, void *user_data ) {
+	
+	timeval time;
+	gettimeofday(&time, NULL);
+	long hackTime = (time.tv_sec * 1000) + (time.tv_usec / 1000) - g_time;
+	
+	if(hackTime/1000 == (g_hackIndex+1) && g_hackIndex<g_instruments.size()) {
+		g_drummer->noteOn(g_instruments[g_hackIndex], 1);
+		g_hackIndex++;
+	}
+	
 	SAMPLE * old_buffer = (SAMPLE *)input_buffer;
 	SAMPLE * new_buffer = (SAMPLE *)output_buffer;
 	for(int i=0;i<nFrames;i++) {
-		new_buffer[i] =  g_drummer->tick();
+		new_buffer[i] =  g_drummer->tick() + g_fin.tick()/3;
 	}
 	// Local Buffer
 	float *m_buffer = (SAMPLE *)malloc(sizeof(SAMPLE)*g_bufferSize);
@@ -115,26 +129,41 @@ int callback_func( void *output_buffer, void *input_buffer, unsigned int nFrames
     }
 	sum/=nFrames;
 	sum = sqrt(sum);
+
+	if(sum > g_energyThreshold1) {
+		if(!g_recording1) {
+			firstTime = true;
+		}
+		g_recording1 = true;
+	}
+	if(sum > g_energyThreshold2)
+		g_recording2 = true;
+	if(g_recording1 && sum < g_energyThreshold1)
+		g_recording1 = false;
+	if(g_recording2 && sum < g_energyThreshold2)
+		g_recording2 = false;
 	
-	// cout<<sum<<endl;
-	if(!g_recording && sum>g_energyThreshold) {
-		// Start Recording
-		g_recording = true;
-		g_numBuffersSeen = 0;	
-		g_start = g_sampleBuffers.size()-1;
-		cout<<"Started Recording Automatically"<<endl;
-		g_instrument = "";
-		g_instrumentId = -1;
+	if(!g_recording) {
+		if(g_recording2 || firstTime) {			
+			// Start Recording
+			g_recording = true;
+			g_numBuffersSeen = 0;
+			g_samplesSize = 0;
+			g_start = g_sampleBuffers.size()-1;
+			cout<<"Started Recording Automatically"<<endl;
+			g_instrument = "";			
+		}
+	}
+	else {
+		if(!firstTime && !g_recording2)
+			g_recording = false;
+		if(!g_recording1) {
+			g_recording = false;
+			firstTime = false;
+		}
 	}
 	
 	if(g_recording) {
-		if(sum<g_energyThreshold) {
-			g_recording = false;
-		}
-		else {
-			if(g_numBuffersSeen == 0) {
-				g_samplesSize = 0;
-			}
 			if(g_numBuffersSeen < g_numLastBuffersToUse) {
 				for( int i = 0; i < nFrames; i++ )
 				{
@@ -149,9 +178,9 @@ int callback_func( void *output_buffer, void *input_buffer, unsigned int nFrames
 				// g_recording = false;
 				// g_numBuffersSeen = 0;
 				g_shouldCalculateFeatures = true;
+				firstTime = false;
 				// cout<<"Now it should calculate features"<<endl;
 			}
-		}
 	}
     
 	return 0;	
@@ -210,7 +239,7 @@ int main( int argc, char ** argv )
     // create the window
     glutCreateWindow( "Beat Box Hero" );
     
-	//glutFullScreen();
+	glutFullScreen();
 	
     // set the idle function - called when idle
     glutIdleFunc( idleFunc );
@@ -225,14 +254,16 @@ int main( int argc, char ** argv )
     
     // do our own initialization
     initialize();
-    
-	timeval time;
-	gettimeofday(&time, NULL);
-	g_time = (time.tv_sec * 1000) + (time.tv_usec / 1000);
+
+	// Set the global sample rate before creating class instances.
+  	Stk::setSampleRate( 44100 );
+  	Stk::showWarnings( true );
+  	Stk::setRawwavePath( "stk-4.4.1/rawwaves/" );
+	
 	
 	// Read in beats file
-	if(argc > 1) {
-		ifstream iff(argv[1]);
+	if(argc > 2) {
+		ifstream iff(argv[2]);
 		string s,beatname;
 		long t;
 		int n;
@@ -249,6 +280,24 @@ int main( int argc, char ** argv )
 				g_beatMap.insert(make_pair(t,3));
 		}
 		g_mapIter = g_beatMap.begin();
+		
+		try 
+		{
+			// read the file
+			g_fin.openFile( argv[1] );
+			// change the rate
+			g_fin.setRate( 1 );
+			// normalize the peak
+			g_fin.normalize();
+		} catch( StkError & e )
+		{
+			cerr << "baaaaaaaaad..." << endl;
+			return 1;
+		}
+		
+	}
+	else {
+		cerr<<"Usage:\n./BeatBoxHero <song file> <beat file>"<<endl;
 	}
 	
 	g_instruments.push_back(36);
@@ -256,10 +305,6 @@ int main( int argc, char ** argv )
 	g_instruments.push_back(38);
 	g_instruments.push_back(42);
 	
-	// Set the global sample rate before creating class instances.
-  	Stk::setSampleRate( 44100 );
-  	Stk::showWarnings( true );
-  	Stk::setRawwavePath( "stk-4.4.1/rawwaves/" );
 	
 	// Get RtAudio Instance with default API
 	g_dac = new RtAudio();
@@ -297,6 +342,10 @@ int main( int argc, char ** argv )
 	g_samples = (SAMPLE *)malloc(sizeof(SAMPLE)*g_bufferSize*g_numMaxBuffersToUse);
 	
 	g_drummer = new Drummer();
+	timeval time;
+	gettimeofday(&time, NULL);
+	g_time = (time.tv_sec * 1000) + (time.tv_usec / 1000);
+	
 	// Start Stream
 	try {
         g_dac->startStream();
@@ -506,8 +555,9 @@ void draw_string( GLfloat x, GLfloat y, GLfloat z, const char * str, GLfloat sca
 }
 
 int g_windowSize = 2500;
-int g_displacementFromBottom = 400;
+int g_displacementFromBottom = 600;
 int g_hitSize = 400;
+float y_temp = 0;
 vector<long> hits;
 
 //-----------------------------------------------------------------------------
@@ -520,9 +570,6 @@ void displayFunc( )
 	static float *spectrum;
 	GLfloat x = 4, y = 4.5, z = -20;
 
-	timeval time;
-	gettimeofday(&time, NULL);
-	long t = (time.tv_sec * 1000) + (time.tv_usec / 1000) - g_time;
 	
 	double xinc = 2.0*x/g_instruments.size();
 
@@ -541,9 +588,7 @@ void displayFunc( )
     // pop
 	glPopMatrix();
     
-	static bool doesHit = false;
-	// Draw spheres
-	long start = t + g_windowSize - g_displacementFromBottom;
+//	static bool doesHit = false;
 	g_instrumentId = -1;
 	if(g_shouldCalculateFeatures) {
 		cout<<"Calculating features"<<endl;
@@ -605,18 +650,37 @@ void displayFunc( )
 //		doesHit = false;
 	
 	
+	timeval time;
+	gettimeofday(&time, NULL);
+	long t = (time.tv_sec * 1000) + (time.tv_usec / 1000) - g_time;
+	
+	// Draw spheres
+	long start = t - g_displacementFromBottom;
 	glPushMatrix();
 		glColor3f(0.5,0.5,0.5 );
 		// Draw Rectangle
-		glRectf(-1*x - 1, y - (start-t - g_hitSize/2)*2*y/g_windowSize, x + 1, y - (start-t + g_hitSize/2)*2*y/g_windowSize);
+		glRectf(-1*x - 1, -y + (t-start + g_hitSize/2-50)*2*y/g_windowSize, x + 1, -y + (t-start - g_hitSize/2-50)*2*y/g_windowSize);
 	
 		glColor3f(1,1,1 );
 		// Add Names
+	if(g_hackIndex == 1)
+		draw_string(-1*x+0.2*xinc,-1*y+0.2,0,"Boom",4);
+	else
 		draw_string(-1*x+0.2*xinc,-1*y+0.2,0,"Boom",3);
+	
+	if(g_hackIndex == 2)
+		draw_string(-1*x+1.2*xinc,-1*y+0.2,0,"Tok",4);
+	else
 		draw_string(-1*x+1.2*xinc,-1*y+0.2,0,"Tok",3);
-		draw_string(-1*x+2.2*xinc,-1*y+0.2,0,"Cha",3);
+	if(g_hackIndex == 3)
+		draw_string(-1*x+2.2*xinc,-1*y+0.2,0,"Cha",4);
+	else
+		draw_string(-1*x+2.2*xinc,-1*y+0.2,0,"Cha",3);		
+	if(g_hackIndex == 4)
+		draw_string(-1*x+3.2*xinc,-1*y+0.2,0,"Chi",4);
+	else
 		draw_string(-1*x+3.2*xinc,-1*y+0.2,0,"Chi",3);
-
+	
 	glPopMatrix();
 	
 	while(g_mapIter != g_beatMap.end()) {
@@ -638,7 +702,7 @@ void displayFunc( )
 				break;
 		}
 		GLfloat radius = 0.3;
-		
+
 		if(key >= t - g_hitSize/2 && key <= t+g_hitSize/2) {
 			if(find(hits.begin(), hits.end(), key) == hits.end()) {
 				if(g_instrumentId == beat) {
@@ -659,7 +723,7 @@ void displayFunc( )
 		}
 		
 //		std::cout<<key<<" "<<t<<" "<<radius<<std::endl;
-		glTranslatef(-1*x + (beat + 0.5)*xinc, y - (start-key)*2*y/2500 , 0);
+		glTranslatef(-1*x + (beat + 0.5)*xinc, -y + (key-start)*2*y/g_windowSize , 0);
 		glutSolidSphere(radius,25,25);
 		g_mapIter++;		
 		glPopMatrix();
@@ -701,6 +765,12 @@ void displayFunc( )
 		glEnd();
 		
 	}
+	x=-4;
+	glBegin( GL_LINE_STRIP );
+	glVertex3f( x, y_temp , 0);
+	glVertex3f( -1*x, y_temp , 0);
+	glEnd();	
+	
     // pop
 	glPopMatrix();
 	
