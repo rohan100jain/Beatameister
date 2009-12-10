@@ -25,14 +25,18 @@ STK_OBJS = $(STKRELEASE_DIR)Stk.o $(STKRELEASE_DIR)Mutex.o $(STKRELEASE_DIR)Drum
 OBJS =   RtAudio.o chuck_fft.o Beatameister.o lpc.o Thread.o Stk.o midiio_osx.o
 OBJS2 = SynthesisEngine.o RtAudio.o
 OBJS3 = SongAnnotator.o RtAudio.o
+OBJS4 = BeatBoxHero.o RtAudio.o
 
-all:Beatameister SynthesisEngine SongAnnotator
+all:Beatameister SynthesisEngine SongAnnotator BeatBoxHero
 
 Beatameister: $(OBJS)
 	$(CXX) -o Beatameister $(OBJS) $(STK_OBJS) $(OSCPACK_OBJS) $(LIBS)
 
 SynthesisEngine: $(OBJS2)
 	$(CXX) -o SynthesisEngine $(OBJS2) $(STK_OBJS) $(OSCPACK_OBJS) $(LIBS)
+
+BeatBoxHero: $(OBJS4)
+	$(CXX) -o BeatBoxHero $(OBJS4) $(STK_OBJS) $(OSCPACK_OBJS) $(LIBS)
 
 SongAnnotator: $(OBJS3)
 	$(CXX) -o SongAnnotator $(OBJS3) $(STK_OBJS) $(OSCPACK_OBJS) $(LIBS)
@@ -43,6 +47,9 @@ Beatameister.o: Beatameister.cpp $(RTAUDIOPATH)RtAudio.h
 
 SynthesisEngine.o: SynthesisEngine.cpp $(RTAUDIOPATH)RtAudio.h
 	$(CXX) $(FLAGS) SynthesisEngine.cpp 
+
+BeatBoxHero.o: BeatBoxHero.cpp
+	$(CXX) $(FLAGS) BeatBoxHero.cpp 
 
 SongAnnotator.o: SongAnnotator.cpp $(RTAUDIOPATH)RtAudio.h
 	$(CXX) $(FLAGS) SongAnnotator.cpp 
