@@ -47,6 +47,14 @@
 using namespace std;
 using namespace stk;
 
+
+//display state
+int g_displayState = 0;
+
+//beats and song file name
+string g_beatFileName = "blink.txt";
+string g_songFileName = "blink.wav";
+
 int g_hackIndex = 0;
 // playing back
 long g_time;
@@ -109,7 +117,7 @@ int callback_func( void *output_buffer, void *input_buffer, unsigned int nFrames
 	SAMPLE * old_buffer = (SAMPLE *)input_buffer;
 	SAMPLE * new_buffer = (SAMPLE *)output_buffer;
 	for(int i=0;i<nFrames;i++) {
-		new_buffer[i] =  g_drummer->tick() + g_fin.tick()/3;
+			new_buffer[i] =  g_drummer->tick() + g_fin.tick()/3;
 	}
 	// Local Buffer
 	float *m_buffer = (SAMPLE *)malloc(sizeof(SAMPLE)*g_bufferSize);
@@ -260,46 +268,7 @@ int main( int argc, char ** argv )
   	Stk::showWarnings( true );
   	Stk::setRawwavePath( "stk-4.4.1/rawwaves/" );
 	
-	
-	// Read in beats file
-	if(argc > 2) {
-		ifstream iff(argv[2]);
-		string s,beatname;
-		long t;
-		int n;
-		while(getline(iff, s) != NULL) {
-			istringstream iss(s);
-			iss>>t>>beatname;
-			if(beatname == "bass")
-				g_beatMap.insert(make_pair(t,0));
-			else if(beatname == "midtom")
-				g_beatMap.insert(make_pair(t,1));
-			else if(beatname == "snare")
-				g_beatMap.insert(make_pair(t,2));
-			else if(beatname == "hihat")
-				g_beatMap.insert(make_pair(t,3));
-		}
-		g_mapIter = g_beatMap.begin();
 		
-		try 
-		{
-			// read the file
-			g_fin.openFile( argv[1] );
-			// change the rate
-			g_fin.setRate( 1 );
-			// normalize the peak
-			g_fin.normalize();
-		} catch( StkError & e )
-		{
-			cerr << "baaaaaaaaad..." << endl;
-			return 1;
-		}
-		
-	}
-	else {
-		cerr<<"Usage:\n./BeatBoxHero <song file> <beat file>"<<endl;
-	}
-	
 	g_instruments.push_back(36);
 	g_instruments.push_back(45);
 	g_instruments.push_back(38);
@@ -342,6 +311,46 @@ int main( int argc, char ** argv )
 	g_samples = (SAMPLE *)malloc(sizeof(SAMPLE)*g_bufferSize*g_numMaxBuffersToUse);
 	
 	g_drummer = new Drummer();
+	
+    // let GLUT handle the current thread from here
+    glutMainLoop();
+    
+	return 0;
+}
+
+
+void init_playing() {
+		ifstream iff(g_beatFileName.c_str());
+		string s,beatname;
+		long t;
+		int n;
+		while(getline(iff, s) != NULL) {
+			istringstream iss(s);
+			iss>>t>>beatname;
+			if(beatname == "bass")
+				g_beatMap.insert(make_pair(t,0));
+			else if(beatname == "midtom")
+				g_beatMap.insert(make_pair(t,1));
+			else if(beatname == "snare")
+				g_beatMap.insert(make_pair(t,2));
+			else if(beatname == "hihat")
+				g_beatMap.insert(make_pair(t,3));
+		}
+		g_mapIter = g_beatMap.begin();
+		
+		try 
+		{
+			// read the file
+			g_fin.openFile(g_songFileName.c_str());
+			// change the rate
+			g_fin.setRate( 1 );
+			// normalize the peak
+			g_fin.normalize();
+		} catch( StkError & e )
+		{
+			cerr << "baaaaaaaaad..." << endl;
+			return;
+		}	
 	timeval time;
 	gettimeofday(&time, NULL);
 	g_time = (time.tv_sec * 1000) + (time.tv_usec / 1000);
@@ -352,21 +361,9 @@ int main( int argc, char ** argv )
     } catch( RtError & err ) {
         // do stuff
         err.printMessage();
-        goto cleanup;
     }
 	
-    // let GLUT handle the current thread from here
-    glutMainLoop();
-    
-	cleanup:
-		g_dac->closeStream();
-		delete g_dac;
-	
-    return 0;
 }
-
-
-
 
 //-----------------------------------------------------------------------------
 // Name: initialize( )
@@ -504,6 +501,21 @@ void mouseFunc( int button, int state, int x, int y )
         // when left mouse button is down, move left
         if( state == GLUT_DOWN )
         {
+			if (g_displayState == 0) {
+				cout <<"Pressed a button "<<x<<"  "<<y<<endl;
+				if (x>200 && y>450 && x<1000 && y<500) {
+					g_beatFileName = "blink.txt";
+					g_songFileName = "blink.wav";
+					cout<<"Pressed option1"<<endl;
+					g_displayState = 1;
+				}
+				if (x>200 && y> 620 && x<1200 && y<680) {
+					g_beatFileName = "offsprings.txt";
+					g_songFileName = "offsprings.wav";
+					cout<<"Pressed option2"<<endl;		
+					g_displayState = 1;
+				}
+			}
         }
         else
         {
@@ -559,7 +571,11 @@ int g_displacementFromBottom = 600;
 int g_hitSize = 400;
 float y_temp = 0;
 vector<long> hits;
-
+float g_initSize = 1;
+float g_size = g_initSize;
+float g_rate = 0.005;
+float g_finalSize = 5;
+int g_index = 1;
 //-----------------------------------------------------------------------------
 // Name: displayFunc( )
 // Desc: callback function invoked to draw the client area
@@ -567,212 +583,247 @@ vector<long> hits;
 void displayFunc( )
 {
 	glClear( GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT );
-	static float *spectrum;
-	GLfloat x = 4, y = 4.5, z = -20;
-
 	
-	double xinc = 2.0*x/g_instruments.size();
-
-	// Draw Lines
-	// push
-	glPushMatrix();
-		glColor3f(0.7,0.7,0.7 );
-		for(int i=0;i<g_instruments.size()+1;i++) {
-			glBegin( GL_LINE_STRIP );
-				glVertex3f(-1*x + i*xinc  , y ,0);
-				glVertex3f(-1*x + i*xinc, -1*y ,0 );
-			glEnd();
-		}
-
-	
-    // pop
-	glPopMatrix();
-    
-//	static bool doesHit = false;
-	g_instrumentId = -1;
-	if(g_shouldCalculateFeatures) {
-		cout<<"Calculating features"<<endl;
-		// Reset Features
-		g_zeroCrossings = 0;
-		g_centroid = 0;
-		g_pitch = 0.0;
-		// Local Buffer
-		float *m_dataBuffer = (SAMPLE *)malloc(sizeof(SAMPLE)*g_samplesSize);
-		// copy 
-		memcpy(m_dataBuffer, g_samples, sizeof(SAMPLE)*g_samplesSize);		
-		int m_samplesSize = g_samplesSize;
-		// Calculate Features
-		detectZeroCrossings(m_dataBuffer, m_samplesSize,  g_zeroCrossings);
-		spectrum = getSpectrum(m_dataBuffer, m_samplesSize);
-		int n = g_samplesSize/2;
-		detectSpectralCentroid(g_centroid, spectrum, n);
-		detectPitch(m_dataBuffer, m_samplesSize, g_pitch);
-		g_shouldCalculateFeatures = false;
+	if (g_displayState == 0) {
 		
-		if(g_zeroCrossings > g_zcrThreshold) {
-			if(g_centroid < 6000) {
-				g_instrument = "snare";
-				g_instrumentId = 2;
-			}
-			else {
-				g_instrument = "hihat";
-				g_instrumentId = 3;
-			}
-		}
+		glPushMatrix();
+		
+		ostringstream s1,s2;
+		s1<<"What's my age again - Blink 182";
+		draw_string(-5,-1,0,s1.str().c_str(),4);
+		s2<<"Why don't you get a job - The Offspring";
+		draw_string(-5,-3,0,s2.str().c_str(),4);
+		
+		
+		glPopMatrix();
+		
+	}
+	
+	if (g_displayState == 1){
+		ostringstream s;
+		s<<"Ready";
+		draw_string(-g_size/10,0,0,s.str().c_str(),g_size);
+
+		if (g_size >= g_finalSize)
+			g_index++;
 		else {
-			if(g_pitch > g_pitchThreshold) {
-				g_instrument = "midtom";
-				g_instrumentId = 1;
-			}
-			else {
-				g_instrument = "bass";
-				g_instrumentId = 0;
-			}
+			g_size += g_rate;
+		}
+		if (g_index > 500) {
+			g_displayState = 5;
+			init_playing();
+			g_size = g_initSize;
 		}
 	}
 	
-	/*ostringstream s,s1,s2,s3,s4,s5,s6,s7;
-	s<<"Zero Crossing Rate: "<<g_zeroCrossings;	    
-	draw_string(1.5,1,0,s.str().c_str(),1);
-	s5<<"Pitch: "<<g_pitch;	    
-	draw_string(1.5,-1.5,0,s5.str().c_str(),1);
-	s7<<"Spectral Centroid: "<<g_centroid;	    
-	draw_string(1.5,-2.5,0,s7.str().c_str(),1);
-	*/
-	// set the color
-	glColor3f(1.0, 0.25, 0.25);
-	draw_string(0,0.5,0,g_instrument.c_str(),2);
-	
-	
-//	if(t%2 == 0)
-//		doesHit = true;
-//	else
-//		doesHit = false;
-	
-	
-	timeval time;
-	gettimeofday(&time, NULL);
-	long t = (time.tv_sec * 1000) + (time.tv_usec / 1000) - g_time;
-	
-	// Draw spheres
-	long start = t - g_displacementFromBottom;
-	glPushMatrix();
-		glColor3f(0.5,0.5,0.5 );
-		// Draw Rectangle
-		glRectf(-1*x - 1, -y + (t-start + g_hitSize/2-50)*2*y/g_windowSize, x + 1, -y + (t-start - g_hitSize/2-50)*2*y/g_windowSize);
-	
-		glColor3f(1,1,1 );
-		// Add Names
-	if(g_hackIndex == 1)
-		draw_string(-1*x+0.2*xinc,-1*y+0.2,0,"Boom",4);
-	else
-		draw_string(-1*x+0.2*xinc,-1*y+0.2,0,"Boom",3);
-	
-	if(g_hackIndex == 2)
-		draw_string(-1*x+1.2*xinc,-1*y+0.2,0,"Tok",4);
-	else
-		draw_string(-1*x+1.2*xinc,-1*y+0.2,0,"Tok",3);
-	if(g_hackIndex == 3)
-		draw_string(-1*x+2.2*xinc,-1*y+0.2,0,"Cha",4);
-	else
-		draw_string(-1*x+2.2*xinc,-1*y+0.2,0,"Cha",3);		
-	if(g_hackIndex == 4)
-		draw_string(-1*x+3.2*xinc,-1*y+0.2,0,"Chi",4);
-	else
-		draw_string(-1*x+3.2*xinc,-1*y+0.2,0,"Chi",3);
-	
-	glPopMatrix();
-	
-	while(g_mapIter != g_beatMap.end()) {
-		long key = g_mapIter->first;
-		int beat = g_mapIter->second;
-		glPushMatrix();
-		switch(beat) {
-			case 0: 
-				glColor3f(0.8,0.2,0.2 );
-				break;
-			case 1: 
-				glColor3f(0.2,0.8,0.2 );
-				break;
-			case 2: 
-				glColor3f(0.2,0.2,0.8 );
-				break;
-			case 3: 
-				glColor3f(0.8,0.8,0.5 );
-				break;
-		}
-		GLfloat radius = 0.3;
+	if (g_displayState == 5) {
+		static float *spectrum;
+		GLfloat x = 4, y = 4.5, z = -20;
 
-		if(key >= t - g_hitSize/2 && key <= t+g_hitSize/2) {
-			if(find(hits.begin(), hits.end(), key) == hits.end()) {
-				if(g_instrumentId == beat) {
-					glColor3f(0.8,0.8,0.8 );
-					draw_string(-1*x-1,0,0,"hit",5);
-					hits.push_back(key);
-					radius = 0.5;
-					StkFloat note = g_instruments[beat];
-					std::cout<<"Trying to strike! "<<note<<std::endl;				
-					g_drummer->noteOn( note, 1.0);
+		
+		double xinc = 2.0*x/g_instruments.size();
+
+		// Draw Lines
+		// push
+		glPushMatrix();
+			glColor3f(0.7,0.7,0.7 );
+			for(int i=0;i<g_instruments.size()+1;i++) {
+				glBegin( GL_LINE_STRIP );
+					glVertex3f(-1*x + i*xinc  , y ,0);
+					glVertex3f(-1*x + i*xinc, -1*y ,0 );
+				glEnd();
+			}
+
+		
+		// pop
+		glPopMatrix();
+		
+	//	static bool doesHit = false;
+		g_instrumentId = -1;
+		if(g_shouldCalculateFeatures) {
+			cout<<"Calculating features"<<endl;
+			// Reset Features
+			g_zeroCrossings = 0;
+			g_centroid = 0;
+			g_pitch = 0.0;
+			// Local Buffer
+			float *m_dataBuffer = (SAMPLE *)malloc(sizeof(SAMPLE)*g_samplesSize);
+			// copy 
+			memcpy(m_dataBuffer, g_samples, sizeof(SAMPLE)*g_samplesSize);		
+			int m_samplesSize = g_samplesSize;
+			// Calculate Features
+			detectZeroCrossings(m_dataBuffer, m_samplesSize,  g_zeroCrossings);
+			spectrum = getSpectrum(m_dataBuffer, m_samplesSize);
+			int n = g_samplesSize/2;
+			detectSpectralCentroid(g_centroid, spectrum, n);
+			detectPitch(m_dataBuffer, m_samplesSize, g_pitch);
+			g_shouldCalculateFeatures = false;
+			
+			if(g_zeroCrossings > g_zcrThreshold) {
+				if(g_centroid < 6000) {
+					g_instrument = "snare";
+					g_instrumentId = 2;
+				}
+				else {
+					g_instrument = "hihat";
+					g_instrumentId = 3;
 				}
 			}
 			else {
-				glColor3f(0.8,0.8,0.8 );
-				draw_string(-1*x-1,0,0,"hit",5);
-				radius = 0.5;
+				if(g_pitch > g_pitchThreshold) {
+					g_instrument = "midtom";
+					g_instrumentId = 1;
+				}
+				else {
+					g_instrument = "bass";
+					g_instrumentId = 0;
+				}
 			}
 		}
 		
-//		std::cout<<key<<" "<<t<<" "<<radius<<std::endl;
-		glTranslatef(-1*x + (beat + 0.5)*xinc, -y + (key-start)*2*y/g_windowSize , 0);
-		glutSolidSphere(radius,25,25);
-		g_mapIter++;		
-		glPopMatrix();
-	}
-	g_mapIter = g_beatMap.begin();
-	
-	x=-4;
-	xinc = ::fabs(2*x / (g_bufferSize*g_numLastBuffersToSee));
-	y=3;
-	// push
-	glPushMatrix();
-	// set the color
-	glColor3f(0.25, 0.25, 1.0);
-	// draw the center line
-	glBegin( GL_LINE_STRIP );
-	glVertex3f( x, y , 0);
-	glVertex3f( -1*x, y , 0);
-	glEnd();
-	
-	// Visualize the last g_numLastBuffersToSee buffers
-	for(int j=g_sampleBuffers.size()-g_numLastBuffersToSee;j<g_sampleBuffers.size();j++) {
+		/*ostringstream s,s1,s2,s3,s4,s5,s6,s7;
+		s<<"Zero Crossing Rate: "<<g_zeroCrossings;	    
+		draw_string(1.5,1,0,s.str().c_str(),1);
+		s5<<"Pitch: "<<g_pitch;	    
+		draw_string(1.5,-1.5,0,s5.str().c_str(),1);
+		s7<<"Spectral Centroid: "<<g_centroid;	    
+		draw_string(1.5,-2.5,0,s7.str().c_str(),1);
+		*/
+		// set the color
+		glColor3f(1.0, 0.25, 0.25);
+		draw_string(0,0.5,0,g_instrument.c_str(),2);
 		
-		if(j>=g_start && j<g_start + g_numLastBuffersToUse) {
-			// Change Color since this buffer is used for feature detection
-			glColor3f(0.25, 1.0, 0.25);				
+		
+	//	if(t%2 == 0)
+	//		doesHit = true;
+	//	else
+	//		doesHit = false;
+		
+		
+		timeval time;
+		gettimeofday(&time, NULL);
+		long t = (time.tv_sec * 1000) + (time.tv_usec / 1000) - g_time;
+		
+		// Draw spheres
+		long start = t - g_displacementFromBottom;
+		glPushMatrix();
+			glColor3f(0.5,0.5,0.5 );
+			// Draw Rectangle
+			glRectf(-1*x - 1, -y + (t-start + g_hitSize/2-50)*2*y/g_windowSize, x + 1, -y + (t-start - g_hitSize/2-50)*2*y/g_windowSize);
+		
+			glColor3f(1,1,1 );
+			// Add Names
+		if(g_hackIndex == 1)
+			draw_string(-1*x+0.2*xinc,-1*y+0.2,0,"Boom",4);
+		else
+			draw_string(-1*x+0.2*xinc,-1*y+0.2,0,"Boom",3);
+		
+		if(g_hackIndex == 2)
+			draw_string(-1*x+1.2*xinc,-1*y+0.2,0,"Tok",4);
+		else
+			draw_string(-1*x+1.2*xinc,-1*y+0.2,0,"Tok",3);
+		if(g_hackIndex == 3)
+			draw_string(-1*x+2.2*xinc,-1*y+0.2,0,"Cha",4);
+		else
+			draw_string(-1*x+2.2*xinc,-1*y+0.2,0,"Cha",3);		
+		if(g_hackIndex == 4)
+			draw_string(-1*x+3.2*xinc,-1*y+0.2,0,"Chi",4);
+		else
+			draw_string(-1*x+3.2*xinc,-1*y+0.2,0,"Chi",3);
+		
+		glPopMatrix();
+		
+		while(g_mapIter != g_beatMap.end()) {
+			long key = g_mapIter->first;
+			int beat = g_mapIter->second;
+			glPushMatrix();
+			switch(beat) {
+				case 0: 
+					glColor3f(0.8,0.2,0.2 );
+					break;
+				case 1: 
+					glColor3f(0.2,0.8,0.2 );
+					break;
+				case 2: 
+					glColor3f(0.2,0.2,0.8 );
+					break;
+				case 3: 
+					glColor3f(0.8,0.8,0.5 );
+					break;
+			}
+			GLfloat radius = 0.3;
+
+			if(key >= t - g_hitSize/2 && key <= t+g_hitSize/2) {
+				if(find(hits.begin(), hits.end(), key) == hits.end()) {
+					if(g_instrumentId == beat) {
+						glColor3f(0.8,0.8,0.8 );
+						draw_string(-1*x-1,0,0,"hit",5);
+						hits.push_back(key);
+						radius = 0.5;
+						StkFloat note = g_instruments[beat];
+						std::cout<<"Trying to strike! "<<note<<std::endl;				
+						g_drummer->noteOn( note, 1.0);
+					}
+				}
+				else {
+					glColor3f(0.8,0.8,0.8 );
+					draw_string(-1*x-1,0,0,"hit",5);
+					radius = 0.5;
+				}
+			}
+			
+	//		std::cout<<key<<" "<<t<<" "<<radius<<std::endl;
+			glTranslatef(-1*x + (beat + 0.5)*xinc, -y + (key-start)*2*y/g_windowSize , 0);
+			glutSolidSphere(radius,25,25);
+			g_mapIter++;		
+			glPopMatrix();
 		}
-		else {
-			// Reset Color
-			glColor3f(0.25, 0.25, 1.0);				
-		}
-		// Draw the lines		
+		g_mapIter = g_beatMap.begin();
+		
+		x=-4;
+		xinc = ::fabs(2*x / (g_bufferSize*g_numLastBuffersToSee));
+		y=3;
+		// push
+		glPushMatrix();
+		// set the color
+		glColor3f(0.25, 0.25, 1.0);
+		// draw the center line
 		glBegin( GL_LINE_STRIP );
-		for( int i = 0; i < g_bufferSize; i++) {
-			// set the next vertex
-			glVertex3f( x, y+ 3*g_sampleBuffers[j][i] ,0);
-			// increment x
-			x += xinc;
-		}
+		glVertex3f( x, y , 0);
+		glVertex3f( -1*x, y , 0);
 		glEnd();
 		
+		// Visualize the last g_numLastBuffersToSee buffers
+		for(int j=g_sampleBuffers.size()-g_numLastBuffersToSee;j<g_sampleBuffers.size();j++) {
+			
+			if(j>=g_start && j<g_start + g_numLastBuffersToUse) {
+				// Change Color since this buffer is used for feature detection
+				glColor3f(0.25, 1.0, 0.25);				
+			}
+			else {
+				// Reset Color
+				glColor3f(0.25, 0.25, 1.0);				
+			}
+			// Draw the lines		
+			glBegin( GL_LINE_STRIP );
+			for( int i = 0; i < g_bufferSize; i++) {
+				// set the next vertex
+				glVertex3f( x, y+ 3*g_sampleBuffers[j][i] ,0);
+				// increment x
+				x += xinc;
+			}
+			glEnd();
+			
+		}
+		x=-4;
+		glBegin( GL_LINE_STRIP );
+		glVertex3f( x, y_temp , 0);
+		glVertex3f( -1*x, y_temp , 0);
+		glEnd();	
+		
+		// pop
+		glPopMatrix();
 	}
-	x=-4;
-	glBegin( GL_LINE_STRIP );
-	glVertex3f( x, y_temp , 0);
-	glVertex3f( -1*x, y_temp , 0);
-	glEnd();	
-	
-    // pop
-	glPopMatrix();
 	
     // flush and swap
     glFlush( );
