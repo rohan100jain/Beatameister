@@ -576,6 +576,8 @@ float g_size = g_initSize;
 float g_rate = 0.005;
 float g_finalSize = 5;
 int g_index = 1;
+int g_totalBalls = 0;
+int g_totalHits = 0;
 //-----------------------------------------------------------------------------
 // Name: displayFunc( )
 // Desc: callback function invoked to draw the client area
@@ -690,15 +692,25 @@ void displayFunc( )
 		draw_string(1.5,-2.5,0,s7.str().c_str(),1);
 		*/
 		// set the color
-		glColor3f(1.0, 0.25, 0.25);
-		draw_string(0,0.5,0,g_instrument.c_str(),2);
+//		glColor3f(1.0, 0.25, 0.25);
+//		draw_string(0,0.5,0,g_instrument.c_str(),2);
 		
 		
 	//	if(t%2 == 0)
 	//		doesHit = true;
 	//	else
 	//		doesHit = false;
+		float percent_hit = 0;
+		if (g_totalBalls > 0) {
+			percent_hit = (float)g_totalHits/(float)g_totalBalls*100;
+		}
+		ostringstream p;
+		p<<"Percentage: "<<percent_hit<<"%";
+		draw_string(5,4,0,p.str().c_str(),2);
 		
+		glColor3f(0.5,0.8,0.5 );
+		glRectf(5.5,-y+1.6*y/100*percent_hit , 6,-y);
+
 		
 		timeval time;
 		gettimeofday(&time, NULL);
@@ -732,7 +744,7 @@ void displayFunc( )
 			draw_string(-1*x+3.2*xinc,-1*y+0.2,0,"Chi",3);
 		
 		glPopMatrix();
-		
+		g_totalBalls = 0;
 		while(g_mapIter != g_beatMap.end()) {
 			long key = g_mapIter->first;
 			int beat = g_mapIter->second;
@@ -752,10 +764,12 @@ void displayFunc( )
 					break;
 			}
 			GLfloat radius = 0.3;
-
+			if (key <=t+g_hitSize/2)
+				g_totalBalls++;
+			
 			if(key >= t - g_hitSize/2 && key <= t+g_hitSize/2) {
 				if(find(hits.begin(), hits.end(), key) == hits.end()) {
-					if(g_instrumentId == beat) {
+					if((g_instrumentId == beat)||(beat == 2 && g_instrumentId == 3)||(beat ==3 && g_instrumentId == 2)) {
 						glColor3f(0.8,0.8,0.8 );
 						draw_string(-1*x-1,0,0,"hit",5);
 						hits.push_back(key);
@@ -763,6 +777,7 @@ void displayFunc( )
 						StkFloat note = g_instruments[beat];
 						std::cout<<"Trying to strike! "<<note<<std::endl;				
 						g_drummer->noteOn( note, 1.0);
+						g_totalHits++;
 					}
 				}
 				else {
