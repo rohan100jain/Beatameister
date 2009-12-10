@@ -44,6 +44,8 @@
 #define MY_PIE 3.14159265358979
 #define SAMPLE float
 
+
+
 using namespace std;
 using namespace stk;
 
@@ -109,7 +111,7 @@ int callback_func( void *output_buffer, void *input_buffer, unsigned int nFrames
 	gettimeofday(&time, NULL);
 	long hackTime = (time.tv_sec * 1000) + (time.tv_usec / 1000) - g_time;
 	
-	if(hackTime/1000 == (g_hackIndex+1) && g_hackIndex<g_instruments.size()) {
+	if(hackTime/300 == (g_hackIndex+1) && g_hackIndex<g_instruments.size()) {
 		g_drummer->noteOn(g_instruments[g_hackIndex], 1);
 		g_hackIndex++;
 	}
@@ -503,13 +505,13 @@ void mouseFunc( int button, int state, int x, int y )
         {
 			if (g_displayState == 0) {
 				cout <<"Pressed a button "<<x<<"  "<<y<<endl;
-				if (x>200 && y>450 && x<1000 && y<500) {
+				if (x>285 && y>528 && x<725 && y<548) {
 					g_beatFileName = "blink.txt";
 					g_songFileName = "blink.wav";
 					cout<<"Pressed option1"<<endl;
 					g_displayState = 1;
 				}
-				if (x>200 && y> 620 && x<1200 && y<680) {
+				if (x>288 && y> 626 && x<826 && y<654) {
 					g_beatFileName = "offsprings.txt";
 					g_songFileName = "offsprings.wav";
 					cout<<"Pressed option2"<<endl;		
@@ -590,11 +592,15 @@ void displayFunc( )
 		
 		glPushMatrix();
 		
-		ostringstream s1,s2;
+		ostringstream s1,s2,s3,s4;
 		s1<<"What's my age again - Blink 182";
-		draw_string(-5,-1,0,s1.str().c_str(),4);
+		draw_string(-4.5,-1,0,s1.str().c_str(),2);
 		s2<<"Why don't you get a job - The Offspring";
-		draw_string(-5,-3,0,s2.str().c_str(),4);
+		draw_string(-4.5,-2,0,s2.str().c_str(),2);
+		s3<<"Select Song";
+		draw_string(-5,0,0,s3.str().c_str(),3);
+		s4<<"BeatBox Hero";
+		draw_string(-3,3,0,s4.str().c_str(),6);
 		
 		
 		glPopMatrix();
