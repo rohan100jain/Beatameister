@@ -704,9 +704,11 @@ void displayFunc( )
 		if (g_totalBalls > 0) {
 			percent_hit = (float)g_totalHits/(float)g_totalBalls*100;
 		}
-		ostringstream p;
-		p<<"Percentage: "<<percent_hit<<"%";
-		draw_string(5,4,0,p.str().c_str(),2);
+		ostringstream s,p;
+		s<<"Score: "<<g_totalHits*5;
+		draw_string(5,4,0,s.str().c_str(),2);
+		p<<(int)percent_hit<<"%";
+		draw_string(5.5,-y+1.6*y/100*percent_hit+0.2,0,p.str().c_str(),2);
 		
 		glColor3f(0.5,0.8,0.5 );
 		glRectf(5.5,-y+1.6*y/100*percent_hit , 6,-y);
